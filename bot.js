@@ -1,105 +1,155 @@
 require("dotenv").config();
 
 const { Telegraf } = require("telegraf");
-const { createCanvas, loadImage } = require("@napi-rs/canvas");
-
 const axios = require("axios");
+const fs = require("fs");
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// Helper function to download an image from a URL as a Buffer
-async function downloadImage(url) {
-  const response = await axios.get(url, { responseType: "arraybuffer" });
-  return Buffer.from(response.data, "binary");
+// 📌 CONFIG
+const MAX_REQUESTS = 2;
+const USERS_FILE = "users.json";
+
+// 🎨 styles
+const styles = [
+  "anime style, vibrant colors",
+  "cyberpunk neon avatar, futuristic",
+  "pixar style 3d character",
+  "dark cinematic portrait",
+  "oil painting, renaissance style",
+  "glitch art, distorted aesthetic",
+];
+
+const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// 📂 FILE HELPERS
+function loadUsers() {
+  if (!fs.existsSync(USERS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(USERS_FILE));
 }
 
-// Handle '/start' command
-bot.start((ctx) => {
-  ctx.reply(
-    "Welcome! Send me any photo, and I will transform it into a custom profile picture for you.",
+function saveUsers(data) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
+}
+
+// 📅 get today's date string
+function getToday() {
+  return new Date().toISOString().split("T")[0];
+}
+
+// 🧠 get + reset logic
+function getUserData(userId) {
+  const users = loadUsers();
+  const today = getToday();
+
+  if (!users[userId]) {
+    users[userId] = { count: 0, lastReset: today };
+  }
+
+  // 🔄 reset if new day
+  if (users[userId].lastReset !== today) {
+    users[userId].count = 0;
+    users[userId].lastReset = today;
+  }
+
+  return { users, user: users[userId] };
+}
+
+// 📸 get telegram image
+async function getImageUrl(ctx) {
+  const photo = ctx.message.photo.pop();
+  const file = await ctx.telegram.getFile(photo.file_id);
+
+  return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+}
+
+// 🚀 replicate call
+async function generateAIImage(imageUrl, prompt) {
+  const response = await axios.post(
+    "https://api.replicate.com/v1/predictions",
+    {
+      version:
+        "ac732df83cea7fffdd8d6f2f8b8c1d9d8c7d9a3dfcc5a2ddc7b1e5b9f6f2b9a6",
+      input: {
+        image: imageUrl,
+        prompt,
+        strength: 0.8,
+      },
+    },
+    {
+      headers: {
+        Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    },
   );
-});
 
-// Handle incoming photos
-bot.on("photo", async (ctx) => {
-  try {
-    await ctx.reply("Processing your custom PFP... Please wait.");
+  let prediction = response.data;
 
-    const photoArray = ctx.message.photo;
-    const highestResPhoto = photoArray[photoArray.length - 1];
-    const fileId = highestResPhoto.file_id;
-    const fileLink = await ctx.telegram.getFileLink(fileId);
-    const imageBuffer = await downloadImage(fileLink.href);
-    const baseImage = await loadImage(imageBuffer);
+  // ⏳ poll
+  while (prediction.status !== "succeeded" && prediction.status !== "failed") {
+    await new Promise((r) => setTimeout(r, 2000));
 
-    const width = baseImage.width;
-    const height = baseImage.height;
-    const canvas = createCanvas(width, height);
-    const ctxCanvas = canvas.getContext("2d");
-
-    // Draw base image
-    ctxCanvas.drawImage(baseImage, 0, 0, width, height);
-
-    // --- DYNAMIC VARIATIONS START HERE ---
-
-    // 1. Array of random badge text options
-    const badgeTexts = [
-      "VERIFIED",
-      "PREMIUM USER",
-      "GAMER",
-      "CREATOR",
-      "VIP MEMBER",
-    ];
-    const randomText =
-      badgeTexts[Math.floor(Math.random() * badgeTexts.length)];
-
-    // 2. Array of random theme colors (Hex codes)
-    const colors = ["#4A90E2", "#E24A4A", "#4AE280", "#F5A623", "#BD10E0"];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
-
-    // 3. Randomize the overlay style (50% chance for a ring border, 50% for corner badges)
-    const styleChoice = Math.random() > 0.5 ? "ring" : "badge";
-
-    if (styleChoice === "ring") {
-      // Draw a random colored outer circle border
-      ctxCanvas.strokeStyle = randomColor;
-      ctxCanvas.lineWidth = Math.min(width, height) * 0.05;
-      ctxCanvas.beginPath();
-      ctxCanvas.arc(
-        width / 2,
-        height / 2,
-        Math.min(width, height) / 2 - ctxCanvas.lineWidth / 2,
-        0,
-        Math.PI * 2,
-      );
-      ctxCanvas.stroke();
-    } else {
-      // Draw a solid dark bottom banner with random text
-      ctxCanvas.fillStyle = "rgba(0, 0, 0, 0.7)";
-      const bannerHeight = height * 0.12;
-      ctxCanvas.fillRect(0, height - bannerHeight, width, bannerHeight);
-
-      ctxCanvas.fillStyle = randomColor; // Text color matches the random theme
-      ctxCanvas.font = `bold ${Math.floor(bannerHeight * 0.45)}px sans-serif`;
-      ctxCanvas.textAlign = "center";
-      ctxCanvas.textBaseline = "middle";
-      ctxCanvas.fillText(randomText, width / 2, height - bannerHeight / 2);
-    }
-
-    // --- DYNAMIC VARIATIONS END HERE ---
-
-    const finalPfpBuffer = canvas.toBuffer("image/png");
-    await ctx.replyWithPhoto(
-      { source: finalPfpBuffer },
+    const poll = await axios.get(
+      `https://api.replicate.com/v1/predictions/${prediction.id}`,
       {
-        caption: "✨ Your unique custom PFP variation is ready!",
+        headers: {
+          Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
+        },
       },
     );
-  } catch (error) {
-    console.error("Error processing image:", error);
-    ctx.reply("Sorry, something went wrong while processing your image.");
+
+    prediction = poll.data;
+  }
+
+  if (prediction.status === "failed") {
+    throw new Error("AI failed");
+  }
+
+  return prediction.output[0];
+}
+
+// 👋 start
+bot.start((ctx) => {
+  ctx.reply("Send a photo — you get 2 AI generations per day 🎨");
+});
+
+// 📸 main handler
+bot.on("photo", async (ctx) => {
+  try {
+    const userId = ctx.from.id.toString();
+
+    const { users, user } = getUserData(userId);
+
+    // 🚫 limit check
+    if (user.count >= MAX_REQUESTS) {
+      return ctx.reply(
+        "You’ve used your 2 generations for today.\nCome back tomorrow 👀",
+      );
+    }
+
+    // ✅ increment
+    user.count += 1;
+    saveUsers(users);
+
+    await ctx.reply(`🎨 Generating (${user.count}/${MAX_REQUESTS})...`);
+
+    const imageUrl = await getImageUrl(ctx);
+
+    const style = rand(styles);
+    const prompt = `High quality profile picture, ${style}, ultra detailed, 4k`;
+
+    const aiImage = await generateAIImage(imageUrl, prompt);
+
+    await ctx.replyWithPhoto(aiImage, {
+      caption: ` Done (${user.count}/${MAX_REQUESTS})`,
+    });
+  } catch (err) {
+    console.error(err);
+    ctx.reply("❌ Something went wrong.");
   }
 });
 
+// 🚀 launch
 bot.launch();
-console.log("PFP modification bot is running...");
+console.log("Bot running with daily limits...");
