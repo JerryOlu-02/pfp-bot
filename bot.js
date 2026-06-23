@@ -60,7 +60,12 @@ async function getImageUrl(ctx) {
   const photo = ctx.message.photo.pop();
   const file = await ctx.telegram.getFile(photo.file_id);
 
-  return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+  const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+  const res = await axios.get(url, {
+    responseType: "arraybuffer",
+  });
+
+  return res.data;
 }
 
 // 🚀 replicate call
@@ -68,12 +73,11 @@ async function generateAIImage(imageUrl, prompt) {
   const response = await axios.post(
     "https://api.replicate.com/v1/predictions",
     {
-      version:
-        "ac732df83cea7fffdd8d6f2f8b8c1d9d8c7d9a3dfcc5a2ddc7b1e5b9f6f2b9a6",
+      version: "stability-ai/sdxl", // or proper version ID from Replicate
       input: {
         image: imageUrl,
-        prompt,
-        strength: 0.8,
+        prompt: prompt,
+        strength: 0.75,
       },
     },
     {
@@ -86,7 +90,6 @@ async function generateAIImage(imageUrl, prompt) {
 
   let prediction = response.data;
 
-  // ⏳ poll
   while (prediction.status !== "succeeded" && prediction.status !== "failed") {
     await new Promise((r) => setTimeout(r, 2000));
 
@@ -103,7 +106,7 @@ async function generateAIImage(imageUrl, prompt) {
   }
 
   if (prediction.status === "failed") {
-    throw new Error("AI failed");
+    throw new Error(prediction.error || "Generation failed");
   }
 
   return prediction.output[0];
