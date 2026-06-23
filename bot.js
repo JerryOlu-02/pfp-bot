@@ -58,14 +58,12 @@ function getUserData(userId) {
 // 📸 get telegram image
 async function getImageUrl(ctx) {
   const photo = ctx.message.photo.pop();
+
   const file = await ctx.telegram.getFile(photo.file_id);
 
   const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-  const res = await axios.get(url, {
-    responseType: "arraybuffer",
-  });
 
-  return res.data;
+  return url;
 }
 
 // 🚀 replicate call
