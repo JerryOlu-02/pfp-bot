@@ -30,14 +30,16 @@ async function getImageUrl(ctx) {
 }
 
 // 🚀 REPLICATE USING SDK
-async function generateAI(imageUrl, prompt) {
-  const output = await replicate.run("runwayml/stable-diffusion-v1-5", {
-    input: {
-      image: imageUrl,
-      prompt,
-      num_inference_steps: 25,
+async function generateAI(imageUrl) {
+  const output = await replicate.run(
+    "stability-ai/stable-diffusion-img2img:15a3689ee13b0d2616e98820eca31d4c3abcd36672df6afce5cb6feb1d66087d",
+    {
+      input: {
+        image: imageUrl,
+        num_inference_steps: "25",
+      },
     },
-  });
+  );
 
   return output[0].url();
 }
@@ -54,9 +56,9 @@ bot.on("photo", async (ctx) => {
 
     const imageUrl = await getImageUrl(ctx);
 
-    const prompt = `A high quality profile picture, ${rand(styles)}, ultra detailed, 4k`;
+    // const prompt = `A high quality profile picture, ${rand(styles)}, ultra detailed, 4k`;
 
-    const result = await generateAI(imageUrl, prompt);
+    const result = await generateAI(imageUrl);
 
     await ctx.replyWithPhoto(result, {
       caption: "✨ Your AI avatar is ready!",
