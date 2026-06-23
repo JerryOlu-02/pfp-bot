@@ -31,17 +31,13 @@ async function getImageUrl(ctx) {
 
 // 🚀 REPLICATE USING SDK
 async function generateAI(imageUrl, prompt) {
-  const output = await replicate.run(
-    "stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
-    {
-      input: {
-        image: imageUrl,
-        prompt,
-        num_inference_steps: 25,
-        apply_watermark: false,
-      },
+  const output = await replicate.run("runwayml/stable-diffusion-v1-5", {
+    input: {
+      image: imageUrl,
+      prompt,
+      num_inference_steps: 25,
     },
-  );
+  });
 
   return output[0].url();
 }
