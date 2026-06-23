@@ -1,156 +1,75 @@
 require("dotenv").config();
 
 const { Telegraf } = require("telegraf");
-const axios = require("axios");
-const fs = require("fs");
+const Replicate = require("replicate");
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// 📌 CONFIG
-const MAX_REQUESTS = 2;
-const USERS_FILE = "users.json";
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
+});
 
 // 🎨 styles
 const styles = [
-  "anime style, vibrant colors",
-  "cyberpunk neon avatar, futuristic",
-  "pixar style 3d character",
-  "dark cinematic portrait",
-  "oil painting, renaissance style",
-  "glitch art, distorted aesthetic",
+  "cyberpunk neon portrait",
+  "anime style avatar",
+  "cinematic dramatic lighting",
+  "glitch art distorted aesthetic",
+  "pixar 3d character",
 ];
 
+// helper
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// 📂 FILE HELPERS
-function loadUsers() {
-  if (!fs.existsSync(USERS_FILE)) return {};
-  return JSON.parse(fs.readFileSync(USERS_FILE));
-}
-
-function saveUsers(data) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
-}
-
-// 📅 get today's date string
-function getToday() {
-  return new Date().toISOString().split("T")[0];
-}
-
-// 🧠 get + reset logic
-function getUserData(userId) {
-  const users = loadUsers();
-  const today = getToday();
-
-  if (!users[userId]) {
-    users[userId] = { count: 0, lastReset: today };
-  }
-
-  // 🔄 reset if new day
-  if (users[userId].lastReset !== today) {
-    users[userId].count = 0;
-    users[userId].lastReset = today;
-  }
-
-  return { users, user: users[userId] };
-}
-
-// 📸 get telegram image
+// get telegram image URL
 async function getImageUrl(ctx) {
   const photo = ctx.message.photo.pop();
-
   const file = await ctx.telegram.getFile(photo.file_id);
 
-  const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-
-  return url;
+  return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 }
 
-// 🚀 replicate call
-async function generateAIImage(imageUrl, prompt) {
-  const response = await axios.post(
-    "https://api.replicate.com/v1/predictions",
+// 🚀 REPLICATE USING SDK
+async function generateAI(imageUrl, prompt) {
+  const output = await replicate.run(
+    "stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
     {
-      version: "stability-ai/sdxl", // or proper version ID from Replicate
       input: {
         image: imageUrl,
-        prompt: prompt,
-        strength: 0.75,
-      },
-    },
-    {
-      headers: {
-        Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
-        "Content-Type": "application/json",
+        prompt,
+        num_inference_steps: 25,
+        apply_watermark: false,
       },
     },
   );
 
-  let prediction = response.data;
-
-  while (prediction.status !== "succeeded" && prediction.status !== "failed") {
-    await new Promise((r) => setTimeout(r, 2000));
-
-    const poll = await axios.get(
-      `https://api.replicate.com/v1/predictions/${prediction.id}`,
-      {
-        headers: {
-          Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
-        },
-      },
-    );
-
-    prediction = poll.data;
-  }
-
-  if (prediction.status === "failed") {
-    throw new Error(prediction.error || "Generation failed");
-  }
-
-  return prediction.output[0];
+  return output[0].url();
 }
 
 // 👋 start
 bot.start((ctx) => {
-  ctx.reply("Send a photo — you get 2 AI generations per day 🎨");
+  ctx.reply("Send a photo and I’ll turn it into an AI avatar 🎨");
 });
 
-// 📸 main handler
+// 📸 handler
 bot.on("photo", async (ctx) => {
   try {
-    const userId = ctx.from.id.toString();
-
-    const { users, user } = getUserData(userId);
-
-    // 🚫 limit check
-    if (user.count >= MAX_REQUESTS) {
-      return ctx.reply(
-        "You’ve used your 2 generations for today.\nCome back tomorrow 👀",
-      );
-    }
-
-    // ✅ increment
-    user.count += 1;
-    saveUsers(users);
-
-    await ctx.reply(`🎨 Generating (${user.count}/${MAX_REQUESTS})...`);
+    await ctx.reply("🎨 Generating AI avatar...");
 
     const imageUrl = await getImageUrl(ctx);
 
-    const style = rand(styles);
-    const prompt = `High quality profile picture, ${style}, ultra detailed, 4k`;
+    const prompt = `A high quality profile picture, ${rand(styles)}, ultra detailed, 4k`;
 
-    const aiImage = await generateAIImage(imageUrl, prompt);
+    const result = await generateAI(imageUrl, prompt);
 
-    await ctx.replyWithPhoto(aiImage, {
-      caption: ` Done (${user.count}/${MAX_REQUESTS})`,
+    await ctx.replyWithPhoto(result, {
+      caption: "✨ Your AI avatar is ready!",
     });
   } catch (err) {
     console.error(err);
-    ctx.reply("❌ Something went wrong.");
+    ctx.reply("❌ Failed to generate image.");
   }
 });
 
-// 🚀 launch
 bot.launch();
-console.log("Bot running with daily limits...");
+console.log("🤖 Bot running...");
